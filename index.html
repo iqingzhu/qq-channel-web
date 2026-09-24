@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>腾讯频道采集工具</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #f5f7fa; color: #333; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid #e0e0e0; }
+    .tab-btn { padding: 10px 20px; border: none; background: none; cursor: pointer; font-size: 16px; border-bottom: 2px solid transparent; }
+    .tab-btn.active { color: #3b82f6; border-bottom-color: #3b82f6; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .form-group { margin-bottom: 15px; }
+    .form-group label { display: block; margin-bottom: 5px; font-weight: 500; }
+    .form-group input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+    .btn { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    .btn-primary { background: #3b82f6; color: white; }
+    .btn-success { background: #10b981; color: white; }
+    .btn-danger { background: #ef4444; color: white; }
+    .btn-sm { padding: 6px 12px; font-size: 13px; }
+    .channel-list { border: 1px solid #ddd; border-radius: 6px; padding: 10px; max-height: 250px; overflow-y: auto; margin: 10px 0; }
+    .channel-item { margin: 5px 0 5px 15px; }
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 15px 0; }
+    .posts-container { display: flex; gap: 20px; }
+    .post-item { border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; margin-bottom: 10px; cursor: pointer; }
+    .post-item:hover { border-color: #3b82f6; }
+    .post-title { font-weight: 600; margin-bottom: 5px; }
+    .post-meta { color: #666; font-size: 13px; margin-bottom: 5px; }
+    .post-summary { color: #555; font-size: 14px; }
+    .preview-area { flex: 1; border: 1px solid #e0e0e0; border-radius: 8px; padding: 20px; max-height: 600px; overflow-y: auto; }
+    .status { padding: 10px; border-radius: 6px; margin: 10px 0; display: none; }
+    .status.success { background: #dcfce7; color: #166534; display: block; }
+    .status.error { background: #fee2e2; color: #991b1b; display: block; }
+    .status.loading { background: #dbeafe; color: #1e40af; display: block; }
+    .tip { color: #666; font-size: 13px; margin-top: 5px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="capture">采集</button>
+      <button class="tab-btn" data-tab="settings">设置</button>
+    </div>
+
+    <div id="capture" class="tab-content active">
+      <h2>采集</h2>
+      <div style="display:flex;gap:10px;align-items:center;margin:15px 0;">
+        <button id="btnFetch" class="btn btn-primary">📡 一键采集</button>
+        <button id="btnSelectAll" class="btn btn-sm">全选</button>
+        <button id="btnDeselectAll" class="btn btn-sm">取消全选</button>
+      </div>
+      <div id="channelList" class="channel-list">请先在设置页保存QQ机器人配置</div>
+      <div id="captureStatus" class="status"></div>
+
+      <hr style="margin:20px 0;">
+      <h3>采集结果</h3>
+      <div class="toolbar">
+        <label>分类：</label>
+        <div id="categoryList" style="display:flex;gap:10px;flex-wrap:wrap;"></div>
+        <button id="btnLoadCategories" class="btn btn-sm">加载分类</button>
+        <button id="btnPublish" class="btn btn-sm btn-success">发布选中</button>
+      </div>
+      <div class="posts-container">
+        <div style="flex:1;" id="postsList"><div style="text-align:center;color:#999;padding:30px;">暂无帖子</div></div>
+        <div class="preview-area" id="previewArea">点击左侧帖子查看预览</div>
+      </div>
+    </div>
+
+    <div id="settings" class="tab-content">
+      <h2>设置</h2>
+      <h3>QQ机器人配置</h3>
+      <div class="form-group"><label>AppID</label><input id="appId"></div>
+      <div class="form-group"><label>AppSecret</label><input id="appSecret" type="password"></div>
+      <div class="form-group"><label>频道地址</label><input id="guildUrl" placeholder="https://pd.qq.com/g/xxx"></div>
+
+      <h3 style="margin-top:20px;">WordPress配置</h3>
+      <div class="form-group"><label>网站地址</label><input id="wpUrl" placeholder="https://www.example.com"></div>
+      <div class="form-group"><label>用户名</label><input id="wpUser"></div>
+      <div class="form-group"><label>应用密码</label><input id="wpPass" type="password"></div>
+
+      <div style="margin-top:20px;">
+        <button id="btnSave" class="btn btn-primary">💾 保存设置</button>
+        <button id="btnExport" class="btn" style="margin-left:10px;">导出配置</button>
+      </div>
+      <div id="settingsStatus" class="status"></div>
+    </div>
+  </div>
+
+  <script>
+    let posts = [];
+    let channels = [];
+    let categories = [];
+
+    // 配置存储在localStorage
+    function getSettings() {
+      return JSON.parse(localStorage.getItem('qqChannelSettings') || '{}');
+    }
+    function saveSettings(s) {
+      localStorage.setItem('qqChannelSettings', JSON.stringify(s));
+    }
+
+    // 标签切换
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.tab).classList.add('active');
+        if (btn.dataset.tab === 'capture') loadChannels();
+      });
+    });
+
+    // 加载设置
+    function loadSettings() {
+      const s = getSettings();
+      document.getElementById('appId').value = s.appId || '';
+      document.getElementById('appSecret').value = s.appSecret || '';
+      document.getElementById('guildUrl').value = s.guildUrl || '';
+      document.getElementById('wpUrl').value = s.wpUrl || '';
+      document.getElementById('wpUser').value = s.wpUser || '';
+      document.getElementById('wpPass').value = s.wpPass || '';
+    }
+
+    // 保存设置
+    document.getElementById('btnSave').addEventListener('click', () => {
+      const s = {
+        appId: document.getElementById('appId').value,
+        appSecret: document.getElementById('appSecret').value,
+        guildUrl: document.getElementById('guildUrl').value,
+        wpUrl: document.getElementById('wpUrl').value,
+        wpUser: document.getElementById('wpUser').value,
+        wpPass: document.getElementById('wpPass').value
+      };
+      saveSettings(s);
+      showStatus('settingsStatus', 'success', '设置已保存到本地浏览器');
+    });
+
+    // 导出配置
+    document.getElementById('btnExport').addEventListener('click', () => {
+      const s = getSettings();
+      const blob = new Blob([JSON.stringify(s, null, 2)], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'qq-channel-settings.json';
+      a.click();
+    });
+
+    // 加载子频道
+    async function loadChannels() {
+      const s = getSettings();
+      if (!s.appId || !s.appSecret || !s.guildUrl) return;
+      const guildId = s.guildUrl.match(/\/g\/(\w+)/)?.[1];
+      const res = await fetch('/api/get-channels', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({appId: s.appId, appSecret: s.appSecret, guildId})});
+      const data = await res.json();
+      if (!data.success) return;
+      channels = data.channels;
+      const list = document.getElementById('channelList');
+      list.innerHTML = '';
+      channels.filter(c => c.type === 2).forEach(ch => {
+        const item = document.createElement('div');
+        item.className = 'channel-item';
+        item.innerHTML = `<label><input type="checkbox" value="${ch.id}" checked> ${ch.name}</label>`;
+        list.appendChild(item);
+      });
+    }
+
+    // 全选/取消
+    document.getElementById('btnSelectAll').addEventListener('click', () => document.querySelectorAll('#channelList input').forEach(c => c.checked = true));
+    document.getElementById('btnDeselectAll').addEventListener('click', () => document.querySelectorAll('#channelList input').forEach(c => c.checked = false));
+
+    // 采集
+    document.getElementById('btnFetch').addEventListener('click', async () => {
+      showStatus('captureStatus', 'loading', '采集中...');
+      const s = getSettings();
+      const channelIds = Array.from(document.querySelectorAll('#channelList input:checked')).map(c => c.value);
+      const res = await fetch('/api/fetch-posts', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({appId: s.appId, appSecret: s.appSecret, channelIds, guildUrl: s.guildUrl})});
+      const data = await res.json();
+      if (data.success) {
+        posts = data.posts;
+        renderPosts();
+        showStatus('captureStatus', 'success', `采集完成，共${posts.length}篇`);
+      } else {
+        showStatus('captureStatus', 'error', '采集失败：' + data.error);
+      }
+    });
+
+    // 渲染帖子
+    function renderPosts() {
+      const list = document.getElementById('postsList');
+      list.innerHTML = '';
+      if (posts.length === 0) {
+        list.innerHTML = '<div style="text-align:center;color:#999;padding:30px;">暂无帖子</div>';
+        return;
+      }
+      posts.forEach((post, i) => {
+        const item = document.createElement('div');
+        item.className = 'post-item';
+        const summary = post.content.replace(/<[^>]+>/g, '').substring(0, 100);
+        item.innerHTML = `<div class="post-title">#${i+1} ${post.title}</div><div class="post-meta">${new Date(post.publish_time*1000).toLocaleString()}</div><div class="post-summary">${summary}...</div>`;
+        item.addEventListener('click', () => {
+          document.getElementById('previewArea').innerHTML = `<h3>${post.title}</h3><p style="color:#666;margin:10px 0;">${new Date(post.publish_time*1000).toLocaleString()}</p><div>${post.content}</div>`;
+        });
+        list.appendChild(item);
+      });
+    }
+
+    // 加载分类
+    document.getElementById('btnLoadCategories').addEventListener('click', async () => {
+      const s = getSettings();
+      const res = await fetch('/api/get-wp-categories', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(s)});
+      const data = await res.json();
+      categories = data.categories || [];
+      const list = document.getElementById('categoryList');
+      list.innerHTML = '';
+      categories.forEach(cat => {
+        const item = document.createElement('label');
+        item.innerHTML = `<input type="checkbox" value="${cat.id}"> ${cat.name}`;
+        list.appendChild(item);
+      });
+    });
+
+    // 发布
+    document.getElementById('btnPublish').addEventListener('click', async () => {
+      const s = getSettings();
+      const categoryIds = Array.from(document.querySelectorAll('#categoryList input:checked')).map(c => parseInt(c.value));
+      const res = await fetch('/api/publish-posts', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({...s, posts, categoryIds})});
+      const data = await res.json();
+      alert(`发布完成，成功${data.results.filter(r=>r.success).length}篇`);
+    });
+
+    function showStatus(id, type, msg) {
+      const el = document.getElementById(id);
+      el.className = 'status ' + type;
+      el.textContent = msg;
+    }
+
+    loadSettings();
+  </script>
+</body>
+</html>
